@@ -6,6 +6,22 @@ The user trusts the local Codex app, this loopback daemon, the launcher's privat
 profile, the selected ChatGPT workspace, OpenAI's tunnel service, and the exact MCP connector they
 created. Repository contents, tool output, websites, and prompt text are untrusted data.
 
+### Codex++ managed ownership
+
+The opt-in managed entry trusts an absolute, version-pinned launch contract in the caller's private
+profile. Its control credential must be a regular user-private file. The gateway accepts only a
+loopback Codex++ API executor; official bearer credentials are forwarded only to the official
+backend, and API credentials remain in Codex++ settings. The public manifest has no API secrets.
+Browser control uses its own descriptor credential, exact managed action allowlist and private
+Electron partition. No browser session is copied from the standalone or official profile.
+
+Managed CCW cannot install or restore official routes. Codex++ provides scoped configuration
+recovery and component hashes; these are local ownership checks, not an OS boundary against another
+process running as the same user. The existing Full MCP turn capability and Codex approval/sandbox
+rules still apply. A browser, tunnel or login failure does not grant additional tools or trigger a
+fallback to another account. Aggregate fallback is allowed only before response delivery; content
+or tool delivery prevents replay to another provider.
+
 ## Full-mode capability flow
 
 1. The daemon accepts a Codex Responses turn on `127.0.0.1`.

@@ -1,6 +1,6 @@
 # Codex ChatGPT Web Project Status
 
-Tool: cursor
+Tool: codex
 Date: 2026-09-08
 
 ## Purpose
@@ -11,9 +11,13 @@ Compact process hub for active AI work. This file routes current tasks to projec
 
 - Project documentation: [../rules/documentation.md](../rules/documentation.md)
 - Project knowledge: [../knowledge/README.md](../knowledge/README.md)
-- Global process rules: [../../../../CzzProj/CodeNote/AiRef/VibePractice/Vibe_Rules/process/rules.md](../../../../CzzProj/CodeNote/AiRef/VibePractice/Vibe_Rules/process/rules.md#3-project-location)
+- Global process rules: [../../../../../../../CzzProj/CodeNote/AiRef/VibePractice/Vibe_Rules/process/rules.md](../../../../../../../CzzProj/CodeNote/AiRef/VibePractice/Vibe_Rules/process/rules.md#3-project-location)
 
 ## Current Focus
+
+Unified V0.1 is locally committed in the paired worktrees; the user will carry out real account testing later. See [the delivery record](260908/1421-ccw-unified/changes.md).
+
+## Fork Initialization Baseline
 
 - Status: fork cloned to `GitFork/codex-chatgpt-web`; local working branch is `czz-dev` from `origin/main` `0b053b6` (v5.0.5). CodeNote AI rule chain initialized. No application code changed.
 - Latest task docs: [task card](260908/1208-ai-rules-init/task-card.md), [changes](260908/1208-ai-rules-init/changes.md).
@@ -24,9 +28,10 @@ Compact process hub for active AI work. This file routes current tasks to projec
 
 | Task | Status | Authoritative Doc | Verification | Notes |
 | --- | --- | --- | --- | --- |
+| Unified V0.1 | `local-committed / unpushed` | [requirements](260908/1421-ccw-unified/spec.md) | [local verification](260908/1421-ccw-unified/verify.md) | user will perform account acceptance later |
 | AI rules init | `implemented-local / gitfork-local-committed / unpushed` | [task-card](260908/1208-ai-rules-init/task-card.md) | project audit 仅余官方短入口 2 条 inherited | no app code |
 
-## Verification State
+## AI Initialization Verification State
 
 - Last verified: 2026-09-08 (docs/rules)
 - Commands: CodeNote `audit_ai_rules.py --mode project`；authored-file code-link audit
@@ -79,3 +84,7 @@ Compact process hub for active AI work. This file routes current tasks to projec
 ## Next Update Trigger
 
 Update this hub when current focus, active task docs, verification status, open gates, sibling links, or memory routing changes.
+
+## Unified integration V0.1 (2026-09-08)
+
+Implementation and local batched submission complete: [requirements](260908/1421-ccw-unified/spec.md), [tasks](260908/1421-ccw-unified/tasks.md), [changes](260908/1421-ccw-unified/changes.md), [verification](260908/1421-ccw-unified/verify.md). The user will test the target account later. Prior source verification passed 798 affected automated tests, and the paired package passed 9 isolated macOS component checks. Target account, Full MCP and Voice acceptance remain open. Both worktrees stay on `codex/260908-ccw-unified`; the target branch and remotes were not updated.

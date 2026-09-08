@@ -19,6 +19,30 @@ launcher-owned codex-chatgpt-web daemon
 
 ## Modes
 
+### Codex++ managed integration
+
+The paired V0.1 fork also accepts an explicit `managed --config` launch contract owned by Codex++.
+Codex++ owns the official config, merged model catalogue, Interrupt hook, private profile and child
+process lifetime. The managed Bun gateway forwards native traffic unchanged, routes `cpp/*` and
+`cpp-agg/*` through the authenticated Codex++ API executor, and retains the existing Full MCP Web
+bridge. Official/API routing remains available when the Web helper or its configuration fails.
+
+The `managed` Electron profile supplies browser tabs and an authenticated control descriptor only.
+It has a separate persistent partition and does not run setup, daemon supervision, route connection,
+autostart or updates. Codex++ supervises the gateway, browser and tunnel separately. Stop and Web
+reconfiguration require no active HTTP/browser turns. Standalone commands reject a managed profile,
+including a profile selected using `--home`; shared Codex integration writers also reject it.
+
+The routing manifest contains model capabilities and provider IDs, never credentials. Aggregate
+bindings persist by canonical thread, turn, group and revision; rotation advances once per turn.
+Manual choice and next-request reasoning changes use the authenticated gateway controls. API
+compaction uses tools-disabled summarization and decodes only the bridge-readable `ocx1:` envelope.
+Native Voice and multiagent configuration remain under the official client contract.
+
+This integration is opt-in and does not change standalone production or DEV profile ownership.
+Real account and Full MCP acceptance is tracked in the paired worktree's
+[verification record](../vibe/specs/260908/1421-ccw-unified/verify.md).
+
 ### `browser-only`
 
 - Exposes Instant (`chatgpt-web/light`), Medium, High, and Extra High; each model advertises exactly one
