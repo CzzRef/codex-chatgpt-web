@@ -6,7 +6,7 @@ import { existsSync, rmSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { stdin, stdout } from "node:process";
 import { captureSystemBrowserLoginToFile, checkBrowserEngine, loginToChatGpt } from "./browser-login";
-import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, loadConfig, loadConfigForSetup } from "./config";
+import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, isCodexPlusManagedProfile, loadConfig, loadConfigForSetup } from "./config";
 import {
   inspectLauncherBrowserHost,
   inspectLauncherBrowserHostLiveness,
@@ -555,7 +555,14 @@ async function main(): Promise<void> {
   if (command === "dev" && home) {
     throw new Error("--home does not apply to DEV mode; use CODEX_WEB_GPT_DEV_HOME for an explicit isolated DEV profile");
   }
-  if (command === "help") stdout.write(HELP);
+  if (isCodexPlusManagedProfile() && !["managed", "mcp", "help"].includes(command)) {
+    throw new Error("Codex++ owns this managed profile; use its integration controls instead of CCW setup/service/route/uninstall");
+  }
+  if (command === "managed") {
+    const { runManagedCommand } = await import("./managed");
+    await runManagedCommand(args);
+  }
+  else if (command === "help") stdout.write(HELP);
   else if (command === "setup") await setupCommand(args);
   else if (command === "login") await loginCommand(args);
   else if (command === "doctor" || command === "status") await doctorCommand(args);

@@ -183,7 +183,7 @@ class RuntimeHost {
     this.installedRuntimeRoot = installedRuntimeRoot;
     this.runtimeRootProvider = runtimeRootProvider;
     this.browserDescriptorPath = browserDescriptorPath;
-    if (launcherProfile !== "production" && launcherProfile !== "development") {
+    if (!["production", "development", "managed"].includes(launcherProfile)) {
       throw new Error("Runtime host launcher profile is invalid");
     }
     this.launcherProfile = launcherProfile;
@@ -597,6 +597,7 @@ class RuntimeHost {
   }
 
   async run(name, args, options = {}) {
+    if (this.launcherProfile === "managed") throw new Error("Codex++ owns this integration; use its Web connection controls");
     if (this.active) throw new Error(`Another launcher operation is active: ${this.active}`);
     if (this.activeChild
       && this.activeChild.exitCode === null
@@ -1353,6 +1354,7 @@ class RuntimeHost {
   }
 
   async runSetup(name, args, options) {
+    if (this.launcherProfile === "managed") throw new Error("Codex++ owns this integration; use its Web connection controls");
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const previousRuntime = this.runtimeConfigSnapshot();
     const checkpoint = this.captureSetupCheckpoint(previousRuntime);

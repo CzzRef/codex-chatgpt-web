@@ -27,7 +27,7 @@ const {
 const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
-const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
+const { DEVELOPMENT_PROFILE, MANAGED_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
 const {
@@ -45,9 +45,12 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const SOURCE_ROOT = path.resolve(__dirname, "../..");
 const LAUNCHER_PROFILE = resolveLauncherProfile({ appData: app.getPath("appData") });
 const IS_DEV_PROFILE = LAUNCHER_PROFILE.kind === DEVELOPMENT_PROFILE;
+const IS_MANAGED_PROFILE = LAUNCHER_PROFILE.kind === MANAGED_PROFILE;
 const CORE_HOME = LAUNCHER_PROFILE.coreHome;
 const BROWSER_DESCRIPTOR_PATH = path.join(CORE_HOME, "runtime", "launcher-browser.json");
-const BROWSER_HELPER_PATH = app.isPackaged
+const BROWSER_HELPER_PATH = IS_MANAGED_PROFILE
+  ? path.join(path.dirname(JSON.parse(fs.readFileSync(path.join(CORE_HOME, "managed-launch.json"), "utf8")).runtimeCommand[1]), "browser-helper.cjs")
+  : app.isPackaged
   ? path.join(process.resourcesPath, "runtime", "app", "browser-helper.cjs")
   : path.join(SOURCE_ROOT, ".launcher-runtime", "browser-helper.cjs");
 const GITHUB_URL = "https://github.com/miuuyy/codex-chatgpt-web";
@@ -61,6 +64,7 @@ const APP_ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
 
 process.env.CODEX_CHATGPT_WEB_HOME = CORE_HOME;
 process.env.CODEX_HOME = LAUNCHER_PROFILE.codexHome;
+if (IS_MANAGED_PROFILE) process.env.CODEX_CPP_MANAGED = "1";
 app.setName(LAUNCHER_PROFILE.displayName);
 if (process.platform === "win32") {
   app.setAppUserModelId(IS_DEV_PROFILE ? "dev.codexwebgpt.launcher.dev" : "dev.codexwebgpt.launcher");
@@ -91,6 +95,7 @@ let lastOperation = null;
 let catalogVerificationTimer = null;
 let catalogVerificationInFlight = false;
 let updateController = null;
+let managedBrowserReady = false;
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -460,6 +465,7 @@ function registerIpc({ logger, stateStore }) {
     return stateStore.update(patch);
   });
   handle("launcher:complete-onboarding", (_event, language, rawInteractionMode) => {
+    if (IS_MANAGED_PROFILE) throw new Error("Codex++ owns managed setup");
     const current = stateStore.read();
     if (!current.githubOpened || !current.xOpened) throw new Error("Open the GitHub and X pages before continuing");
     if (current.autoStart) setAutostart(app, true);
@@ -747,6 +753,7 @@ function registerIpc({ logger, stateStore }) {
   });
 
   handle("launcher:autostart", (_event, enabled) => {
+    if (IS_MANAGED_PROFILE) throw new Error("Codex++ owns managed startup");
     if (IS_DEV_PROFILE) throw new Error("The isolated DEV launcher is started explicitly from the repository CLI");
     const desired = enabled === true;
     const autostart = setAutostart(app, desired);
@@ -872,10 +879,12 @@ async function requestQuit() {
   shutdownInProgress = true;
   try {
     const activeOperation = runtimeHost?.currentOperation() || browserHost?.currentOperation();
-    if (activeOperation) {
+    if (activeOperation && !(IS_MANAGED_PROFILE && activeOperation === "session refresh")) {
       throw new Error(`Wait for ${activeOperation} to finish before quitting Codex Web GPT`);
     }
-    await runtimeSupervisor?.shutdown({ cancelActiveTurns: true, force: true });
+    if (IS_MANAGED_PROFILE && activeOperation === "session refresh") browserHost?.view?.webContents.stop();
+    if (IS_MANAGED_PROFILE) browserHost?.assertTurnTabsCanResetForInteractionModeChange();
+    else await runtimeSupervisor?.shutdown({ cancelActiveTurns: true, force: true });
     stopCatalogVerificationMonitor();
     quitting = true;
     await browserHost?.persistSession();
@@ -903,10 +912,11 @@ async function start() {
   }
   app.on("second-instance", () => showMainWindow());
 
-  await waitForPackagedRuntimeSource({ app, resourcesPath: process.resourcesPath });
+  if (!IS_MANAGED_PROFILE) await waitForPackagedRuntimeSource({ app, resourcesPath: process.resourcesPath });
   let installedRuntimeRoot = null;
   let runtimeRootResolved = false;
   const runtimeRootProvider = () => {
+    if (IS_MANAGED_PROFILE) return null;
     const packagedRuntimeWasRemoved = app.isPackaged
       && (!installedRuntimeRoot || !fs.existsSync(installedRuntimeRoot));
     if (!runtimeRootResolved || packagedRuntimeWasRemoved) {
@@ -949,8 +959,8 @@ async function start() {
       codexRestartRequired: false,
     });
   }
-  const autostart = IS_DEV_PROFILE ? { supported: false, enabled: false } : getAutostart(app);
-  if (!IS_DEV_PROFILE
+  const autostart = IS_DEV_PROFILE || IS_MANAGED_PROFILE ? { supported: false, enabled: false } : getAutostart(app);
+  if (!IS_DEV_PROFILE && !IS_MANAGED_PROFILE
     && stateStore.read().onboardingComplete
     && autostart.supported
     && stateStore.read().autoStart !== autostart.enabled) {
@@ -960,7 +970,7 @@ async function start() {
     filePath: path.join(app.getPath("logs"), "launcher.jsonl"),
     publish: (record) => send("launcher:log", record),
   });
-  const startHidden = process.argv.includes("--hidden") && stateStore.read().onboardingComplete;
+  const startHidden = process.argv.includes("--hidden") && (IS_MANAGED_PROFILE || stateStore.read().onboardingComplete);
   nativeTheme.themeSource = "system";
   mainWindow = createWindow({
     logger,
@@ -972,6 +982,19 @@ async function start() {
     logger,
     getBrowserHost: () => browserHost,
     getPreferences: () => stateStore.read(),
+    managedActions: IS_MANAGED_PROFILE ? {
+      show: async () => { showMainWindow(); browserHost?.show(); return { status: "visible" }; },
+      status: async () => ({ status: managedBrowserReady ? "ready" : "starting", pid: process.pid,
+        activeOperation: browserHost?.currentOperation() || null,
+        activeTurnCount: [...(browserHost?.turnTabs?.values() ?? [])].filter(tab => tab.status === "running").length }),
+      reload: async () => {
+        const config = JSON.parse(fs.readFileSync(path.join(CORE_HOME, "config.json"), "utf8"));
+        browserHost?.assertTurnTabsCanResetForInteractionModeChange();
+        const state = stateStore.update({ browserInteractionMode: config.browserInteractionMode, proAvailable: config.proAvailable, solAvailable: config.solAvailable, coreSetupComplete: true, onboardingComplete: true });
+        send("launcher:state-changed", state); return { status: "updated" };
+      },
+      quit: async () => { setImmediate(() => { void requestQuit(); }); return { status: "stopping" }; },
+    } : undefined,
   }).start();
   runtimeSupervisor = new RuntimeSupervisor({
     app,
@@ -1025,7 +1048,7 @@ async function start() {
     currentVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
-    packaged: app.isPackaged && !IS_DEV_PROFILE,
+    packaged: app.isPackaged && !IS_DEV_PROFILE && !IS_MANAGED_PROFILE,
     executablePath: process.execPath,
     runtimeExecutable: updaterRuntimeRoot
       ? runtimeBundlePaths(updaterRuntimeRoot, process.platform).executable
@@ -1047,7 +1070,7 @@ async function start() {
     });
   }
   await loadRenderer(mainWindow);
-  if (!launcherSmokeTest) void updateController.checkOnce();
+  if (!launcherSmokeTest && !IS_MANAGED_PROFILE) void updateController.checkOnce();
   if (launcherSmokeTest) {
     const smokeRuntimeRoot = runtimeRootProvider();
     if (app.isPackaged && !smokeRuntimeRoot) {
@@ -1086,7 +1109,14 @@ async function start() {
     app.quit();
     return;
   }
-  if (IS_DEV_PROFILE) {
+  if (IS_MANAGED_PROFILE) {
+    const config = runtimeSupervisor.readConfig();
+    stateStore.update({ coreSetupComplete: true, onboardingComplete: true, codexCatalogVerified: true, codexRestartRequired: false,
+      browserInteractionMode: config.browserInteractionMode, proAvailable: config.proAvailable, solAvailable: config.solAvailable,
+      experimentalBiggerContext: config.experimentalBiggerContext === true, zeroRiskProEnabled: config.zeroRiskProEnabled === true, autoStart: false });
+    logger.info("managed.browser_ready", { owner: "codex-plusplus" });
+    managedBrowserReady = true;
+  } else if (IS_DEV_PROFILE) {
     let config = null;
     try {
       config = runtimeSupervisor.readConfig();
@@ -1254,10 +1284,18 @@ async function start() {
 }
 
 void start().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = IS_MANAGED_PROFILE && error instanceof SyntaxError
+    ? "Managed browser private configuration is invalid"
+    : error instanceof Error ? error.message : String(error);
   try {
-    fs.appendFileSync(path.join(app.getPath("logs"), "launcher-fatal.log"), `${new Date().toISOString()} ${error?.stack || error}\n`);
+    fs.appendFileSync(path.join(app.getPath("logs"), "launcher-fatal.log"), `${new Date().toISOString()} ${IS_MANAGED_PROFILE ? message : error?.stack || error}\n`);
   } catch {}
+  if (IS_MANAGED_PROFILE) {
+    // A hidden managed child must report failure and exit so its owner can supervise it.
+    process.stderr.write(`${message}\n`);
+    app.exit(1);
+    return;
+  }
   try {
     dialog.showErrorBox("Codex Web GPT could not start", message);
   } catch {}

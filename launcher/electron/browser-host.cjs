@@ -333,10 +333,10 @@ class BrowserHost {
     this.helper = helper;
     this.logger = logger;
     this.loginWithPasskey = loginWithPasskey;
-    if (profile !== "production" && profile !== "development") {
+    if (profile !== "production" && profile !== "development" && profile !== "managed") {
       throw new Error("Browser host profile is invalid");
     }
-    const expectedPartition = profile === "development"
+    const expectedPartition = profile === "managed" ? "persist:codex-plus-managed-chatgpt" : profile === "development"
       ? "persist:codex-web-gpt-dev-chatgpt"
       : "persist:codex-web-gpt-chatgpt";
     if (partition !== expectedPartition) throw new Error("Browser host partition does not match its profile");

@@ -189,7 +189,9 @@ function managedTunnelConnectArgs(config, invocation) {
 
 function validateConfig(config, descriptorPath, platform = process.platform, launcherProfile = "production") {
   if (!config || config.version !== 3) throw new Error("Runtime configuration is missing or unsupported");
-  if (launcherProfile === "development") {
+  if (launcherProfile === "managed") {
+    if (config.purpose !== "managed") throw new Error("Managed launcher requires a managed configuration");
+  } else if (launcherProfile === "development") {
     if (config.purpose !== "dev-harness") {
       throw new Error("DEV launcher refuses a configuration that is not marked dev-harness");
     }
@@ -291,7 +293,8 @@ function validateConfig(config, descriptorPath, platform = process.platform, lau
     }
   };
   if (config.mode === "full") {
-    validateTunnel(config.tunnel, "tunnel");
+    // Codex++ starts its browser before credentials are configured; it owns the separate tunnel process.
+    if (launcherProfile !== "managed" || config.tunnel !== undefined) validateTunnel(config.tunnel, "tunnel");
     if (config.automaticTunnel !== undefined) validateTunnel(config.automaticTunnel, "automaticTunnel");
     if (config.manualTunnel !== undefined) validateTunnel(config.manualTunnel, "manualTunnel");
     if (config.automaticTunnel && config.manualTunnel
@@ -331,7 +334,7 @@ class RuntimeSupervisor {
     this.runtimeRootProvider = runtimeRootProvider;
     this.coreHome = coreHome;
     this.browserDescriptorPath = browserDescriptorPath;
-    if (launcherProfile !== "production" && launcherProfile !== "development") {
+    if (!["production", "development", "managed"].includes(launcherProfile)) {
       throw new Error("Runtime supervisor launcher profile is invalid");
     }
     this.launcherProfile = launcherProfile;
@@ -375,7 +378,9 @@ class RuntimeSupervisor {
     if (!config || typeof config !== "object" || Array.isArray(config)) {
       throw new Error("Runtime configuration is not an object");
     }
-    if (this.launcherProfile === "development") {
+    if (this.launcherProfile === "managed") {
+      if (config.purpose !== "managed") throw new Error("Managed launcher requires a managed configuration");
+    } else if (this.launcherProfile === "development") {
       if (config.purpose !== "dev-harness") {
         throw new Error("DEV launcher refuses a configuration that is not marked dev-harness");
       }
@@ -1156,6 +1161,7 @@ class RuntimeSupervisor {
   }
 
   async startIfConfigured() {
+    if (this.launcherProfile === "managed") throw new Error("Gateway and tunnel processes are owned by Codex++");
     if (this.stopPromise) await this.stopPromise;
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.startConfigured();
@@ -1825,6 +1831,7 @@ class RuntimeSupervisor {
   }
 
   async cancelActiveTurns() {
+    if (this.launcherProfile === "managed") throw new Error("Gateway and tunnel processes are owned by Codex++");
     const config = this.readConfig();
     const daemon = this.daemon;
     if (!config || !daemon || daemon.exitCode !== null || daemon.signalCode !== null) {
@@ -1910,6 +1917,7 @@ class RuntimeSupervisor {
   }
 
   async stopForSetup() {
+    if (this.launcherProfile === "managed") throw new Error("Gateway and tunnel processes are owned by Codex++");
     if (this.stopPromise) return this.stopPromise;
     this.stopPromise = this.performStopForSetup();
     try {
@@ -2031,6 +2039,7 @@ class RuntimeSupervisor {
   }
 
   async forceStopOwnedRuntime(reason) {
+    if (this.launcherProfile === "managed") throw new Error("Gateway and tunnel processes are owned by Codex++");
     this.logger.warn("runtime.forced_shutdown_started", { message: errorMessage(reason) });
     this.stopping = true;
     this.stopTunnelMonitor();

@@ -38,8 +38,9 @@ function writeJson(response, status, body) {
 }
 
 class BrowserControlServer {
-  constructor({ logger, getBrowserHost, getPreferences }) {
+  constructor({ logger, getBrowserHost, getPreferences, managedActions }) {
     this.logger = logger;
+    this.managedActions = managedActions;
     this.getBrowserHost = getBrowserHost;
     this.getPreferences = getPreferences;
     this.token = randomBytes(32).toString("base64url");
@@ -92,6 +93,11 @@ class BrowserControlServer {
     if (!secureTokenMatches(this.token, request.headers.authorization)) {
       writeJson(response, 401, { error: "unauthorized" });
       return;
+    }
+    if (this.managedActions && request.method === "POST" && request.url?.startsWith("/v1/managed/")) {
+      const action = request.url.slice("/v1/managed/".length);
+      if (!Object.hasOwn(this.managedActions, action)) { writeJson(response, 404, { error: "not_found" }); return; }
+      writeJson(response, 200, await this.managedActions[action]()); return;
     }
     const isTurn = request.url === "/v1/turn/start"
       || request.url === "/v1/turn/heartbeat"

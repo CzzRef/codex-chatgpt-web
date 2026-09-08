@@ -3,6 +3,7 @@ const path = require("node:path");
 
 const PRODUCTION_PROFILE = "production";
 const DEVELOPMENT_PROFILE = "development";
+const MANAGED_PROFILE = "managed";
 
 function resolveUserPath(value, homeDir = os.homedir()) {
   if (value === "~") return homeDir;
@@ -20,6 +21,15 @@ function resolveLauncherProfile({
 } = {}) {
   if (typeof appData !== "string" || !path.isAbsolute(appData)) {
     throw new Error("Launcher profile resolution requires an absolute appData path");
+  }
+  if (argv.includes("--managed-profile") || env.CODEX_CPP_MANAGED === "1") {
+    const configured = env.CODEX_CHATGPT_WEB_HOME?.trim();
+    if (!configured || !path.isAbsolute(configured)) throw new Error("Codex++ managed profile requires an absolute private home");
+    const coreHome = path.resolve(configured);
+    if ([path.join(homeDir, ".codex"), path.join(homeDir, ".codex-chatgpt-web")].includes(coreHome)) throw new Error("Managed profile must not use the official or standalone home");
+    return { kind: MANAGED_PROFILE, displayName: "Codex++ · ChatGPT Web", coreHome,
+      codexHome: path.join(coreHome, "unused-codex-home"), userData: path.join(coreHome, "launcher"),
+      browserPartition: "persist:codex-plus-managed-chatgpt" };
   }
   const development = argv.includes("--dev-profile");
   if (!development) {
@@ -62,6 +72,7 @@ function resolveLauncherProfile({
 
 module.exports = {
   DEVELOPMENT_PROFILE,
+  MANAGED_PROFILE,
   PRODUCTION_PROFILE,
   resolveLauncherProfile,
 };

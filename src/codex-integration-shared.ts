@@ -1,3 +1,4 @@
+import { isCodexPlusManagedProfile } from "./config";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -243,6 +244,7 @@ export interface CodexModelContextOverride {
 }
 
 export function getCodexHome(): string {
+  if (isCodexPlusManagedProfile()) throw new Error("Codex++ managed mode cannot access official Codex integration files");
   const configured = process.env.CODEX_HOME?.trim();
   return resolve(expandUserPath(configured || join(homedir(), ".codex")));
 }
