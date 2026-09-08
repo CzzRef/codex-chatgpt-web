@@ -1,0 +1,11 @@
+---
+description: Codex ChatGPT Web project AI entry
+alwaysApply: true
+---
+
+<!-- codenote-agent-ecosystem:start -->
+# codex-chatgpt-web shared project entry
+
+Load [AGENTS.md](../../AGENTS.md) once; it selects the local or portable CodeNote core and the project owner. Follow [vibe/rules/README.md](../../vibe/rules/README.md); load [vibe/rules/documentation.md](../../vibe/rules/documentation.md) and [vibe/specs/PROJECT_STATUS.md](../../vibe/specs/PROJECT_STATUS.md) when the imported route requires them. No independent reply, title or preflight protocol lives here.
+<!-- projection-sha256: b1ae7f8e86998acb7d1cbc3787ea0feeb1fa4ccd8c7d5dc11dbf97019ef830c2 -->
+<!-- codenote-agent-ecosystem:end -->
