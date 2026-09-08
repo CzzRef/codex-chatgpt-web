@@ -162,7 +162,7 @@ export function augmentNativeModelCatalog(
   const nativeModels = structuredClone(
     catalog.models.filter(model => !slug(model)?.startsWith(CHATGPT_WEB_MODEL_PREFIX)),
   );
-  if (config.subagentProtocol === "compatibility-v1") {
+  if (config.subagentProtocol === "compatibility-v1" && config.purpose !== "managed") {
     for (const candidate of nativeModels) {
       if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
         useCompatibilityV1SubagentSurface(candidate as JsonObject);

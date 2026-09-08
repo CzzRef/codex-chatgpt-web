@@ -1,3 +1,4 @@
+import { bindHeaderIdentity, type UnifiedRouter } from "./unified-router";
 import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
@@ -353,6 +354,9 @@ export class HttpTurnCounter {
 type ChatGptWebAdapterFactory = (provider: CodexProviderConfig) => ProviderAdapter;
 
 export interface ResponseRequestOptions {
+  managed?: UnifiedRouter;
+  managedWebUnavailable?: boolean;
+  fetchUpstream?: NativeFetch;
   /** DEV and other in-process harnesses can keep continuation state in their own canonical store. */
   rememberState?: boolean;
   /** Observe the exact production adapter stream when invoking the handler in-process. */
@@ -377,6 +381,7 @@ export async function modelsRequest(
   config: AppConfig,
   fetchUpstream?: NativeFetch,
   contextOverride?: () => CodexModelContextOverride | undefined,
+  managed?: UnifiedRouter,
 ): Promise<Response> {
   let upstream: Response;
   try {
@@ -388,6 +393,7 @@ export async function modelsRequest(
   let catalog: Record<string, unknown>;
   try {
     catalog = augmentNativeModelCatalog(await upstream.json(), config, contextOverride?.());
+    if (managed) catalog = await managed.mergeCatalog(catalog);
   } catch (error) {
     return formatErrorResponse(502, "invalid_response_error", error instanceof Error ? error.message : String(error));
   }
@@ -464,6 +470,7 @@ export async function responseRequest(
     ? (raw as { model?: unknown }).model
     : undefined;
   try {
+    if (options.managed && raw && typeof raw === "object" && !Array.isArray(raw)) bindHeaderIdentity(raw as Record<string, unknown>, req);
     const identity = extractCodexTurnIdentityFromBody(raw);
     if (identity.threadId && identity.turnId) {
       options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
@@ -471,13 +478,23 @@ export async function responseRequest(
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
+  if (options.managed) {
+    try {
+      const response = await options.managed.request(nativeRequest, raw as Record<string, unknown>, "responses");
+      if (response) return response;
+    } catch (error) {
+      const status = Number((error as { status?: number }).status) || 400;
+      return formatErrorResponse(status, "unified_route_error", error instanceof Error ? error.message : String(error));
+    }
+  }
   if (typeof requestedModel === "string" && !isChatGptWebModelSlug(requestedModel)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses", undefined, raw);
+      return await forwardNativeCodexRequest(nativeRequest, "responses", options.fetchUpstream, raw);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
+  if (options.managedWebUnavailable) return formatErrorResponse(503, "managed_web_unavailable", "Managed Web configuration is invalid; repair it in Codex++");
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
@@ -654,7 +671,7 @@ export async function compactRequest(
   req: Request,
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
-  options: Pick<ResponseRequestOptions, "onTurnIdentity"> = {},
+  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "managed" | "fetchUpstream" | "managedWebUnavailable"> = {},
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -696,13 +713,23 @@ export async function compactRequest(
   if (typeof raw.model !== "string" || !raw.model) {
     return formatErrorResponse(400, "invalid_request_error", "Compaction request requires a model");
   }
+  if (options.managed) {
+    try {
+      const response = await options.managed.request(nativeRequest, raw as Record<string, unknown>, "responses/compact");
+      if (response) return response;
+    } catch (error) {
+      const status = Number((error as { status?: number }).status) || 400;
+      return formatErrorResponse(status, "unified_route_error", error instanceof Error ? error.message : String(error));
+    }
+  }
   if (!isChatGptWebModelSlug(raw.model)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", undefined, raw);
+      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", options.fetchUpstream, raw);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
+  if (options.managedWebUnavailable) return formatErrorResponse(503, "managed_web_unavailable", "Managed Web configuration is invalid; repair it in Codex++");
   let route: ChatGptWebModelRoute;
   try {
     route = requireChatGptWebModelRoute(raw.model, config);
@@ -769,7 +796,7 @@ export async function compactRequest(
 
 export function startServer(
   config: AppConfig,
-  dependencies: { fetchUpstream?: NativeFetch; adapterFactory?: ChatGptWebAdapterFactory } = {},
+  dependencies: { fetchUpstream?: NativeFetch; adapterFactory?: ChatGptWebAdapterFactory; managed?: UnifiedRouter; refreshManagedConfig?: () => AppConfig } = {},
 ): ReturnType<typeof Bun.serve> {
   if (config.purpose === "dev-harness") {
     throw new Error("DEV harness configuration cannot start a Responses listener");
@@ -798,26 +825,46 @@ export function startServer(
     const actual = Buffer.from(header);
     return actual.length === expected.length && timingSafeEqual(actual, expected);
   };
+  let managedWebUnavailable = false;
+  let managedWebDraining = false;
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
     idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url);
+      if (config.purpose === "managed" && dependencies.refreshManagedConfig) {
+        try { Object.assign(config, dependencies.refreshManagedConfig()); managedWebUnavailable = false; }
+        catch { managedWebUnavailable = true; }
+      }
       if (req.method === "GET" && url.pathname === "/healthz") {
         return Response.json({
           status: "ok",
           service: "codex-chatgpt-web",
           version: VERSION,
+          purpose: config.purpose ?? "standalone",
           mode: config.mode,
           pid: process.pid,
           port: config.port,
           uptime: (Date.now() - startedAt) / 1_000,
           accepting_turns: !draining,
+          managed_web_config: managedWebUnavailable ? "invalid" : "ready",
+          accepting_web_turns: !draining && !managedWebDraining,
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
           ...activity(),
         });
+      }
+      if (dependencies.managed && url.pathname === "/admin/unified" && ["GET", "POST"].includes(req.method)) {
+        if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
+        try {
+          return Response.json(req.method === "GET" ? await dependencies.managed.status() : await dependencies.managed.control(await readJsonRequestBody(req)));
+        } catch (error) { return formatErrorResponse(400, "unified_control_error", error instanceof Error ? error.message : String(error)); }
+      }
+      if (dependencies.managed && req.method === "POST" && ["/admin/web-drain", "/admin/web-resume"].includes(url.pathname)) {
+        if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
+        managedWebDraining = url.pathname === "/admin/web-drain";
+        return Response.json({ status: "ok", ...activity() });
       }
       if (req.method === "POST" && (url.pathname === "/admin/drain" || url.pathname === "/admin/resume")) {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
@@ -956,7 +1003,7 @@ export function startServer(
           try {
             catalogConfig = {
               ...config,
-              subagentProtocol: readCodexSubagentProtocol(config.subagentProtocol),
+              subagentProtocol: config.purpose === "managed" ? config.subagentProtocol : readCodexSubagentProtocol(config.subagentProtocol),
             };
           } catch (error) {
             return formatErrorResponse(
@@ -969,7 +1016,8 @@ export function startServer(
             new Request(req, { signal }),
             catalogConfig,
             dependencies.fetchUpstream,
-            readCodexModelContextOverride,
+            config.purpose === "managed" ? undefined : readCodexModelContextOverride,
+            dependencies.managed,
           );
           if (response.ok) {
             successfulModelCatalogRequests += 1;
@@ -991,7 +1039,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity },
+            { onTurnIdentity: bindIdentity, managed: dependencies.managed, fetchUpstream: dependencies.fetchUpstream, managedWebUnavailable: managedWebUnavailable || managedWebDraining },
           ),
           req.signal,
           process.platform,
@@ -1005,7 +1053,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity },
+            { onTurnIdentity: bindIdentity, managed: dependencies.managed, fetchUpstream: dependencies.fetchUpstream, managedWebUnavailable: managedWebUnavailable || managedWebDraining },
           ),
           req.signal,
           process.platform,

@@ -100,7 +100,7 @@ export interface TunnelConfig {
 
 export interface AppConfig {
   version: 3;
-  purpose?: "dev-harness";
+  purpose?: "dev-harness" | "managed";
   releaseVersion: string;
   mode: RuntimeMode;
   subagentProtocol: SubagentProtocol;
@@ -154,6 +154,10 @@ export function expandUserPath(value: string): string {
 export function getConfigDir(): string {
   const configured = process.env.CODEX_CHATGPT_WEB_HOME?.trim();
   return resolve(expandUserPath(configured || join(homedir(), ".codex-chatgpt-web")));
+}
+
+export function isCodexPlusManagedProfile(): boolean {
+  return process.env.CODEX_CPP_MANAGED === "1" || existsSync(join(getConfigDir(), "managed-launch.json"));
 }
 
 export function getConfigPath(): string {
@@ -403,7 +407,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid configuration object in ${path}`);
   const parsed = value as Partial<AppConfig>;
   if (parsed.version !== 3) throw new Error(`Unsupported configuration version in ${path}; rerun setup to migrate it`);
-  if (parsed.purpose !== undefined && parsed.purpose !== "dev-harness") {
+  if (parsed.purpose !== undefined && parsed.purpose !== "dev-harness" && parsed.purpose !== "managed") {
     throw new Error(`Invalid configuration purpose in ${path}`);
   }
   if (typeof parsed.releaseVersion !== "string" || !parsed.releaseVersion.trim()) throw new Error(`Missing releaseVersion in ${path}`);

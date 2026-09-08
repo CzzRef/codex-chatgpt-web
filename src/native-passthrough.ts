@@ -242,7 +242,7 @@ export async function forwardNativeCodexRequest(
       compactionRequest ||= endpoint === "responses" && isObject(tail) && tail.type === "compaction_trigger";
     }
     const scrubbed = scrubBridgeArtifactsForNative(parsedBody);
-    if (scrubbed.changed) {
+    if (scrubbed.changed || decodedBody !== undefined) {
       headers.delete("content-encoding");
       body = JSON.stringify(scrubbed.value);
     } else {

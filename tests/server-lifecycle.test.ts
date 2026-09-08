@@ -1290,14 +1290,18 @@ test("authenticated shutdown requires a verified idle drain", async () => {
     });
 
     const deadline = Date.now() + 2_000;
+    const port = Number(new URL(endpoint).port);
     let stopped = false;
     while (Date.now() < deadline && !stopped) {
       await Bun.sleep(20);
-      try {
-        await fetch(`${endpoint}/healthz`);
-      } catch {
-        stopped = true;
-      }
+      // A system HTTP proxy can return 502 after shutdown; probe the owned TCP listener directly.
+      stopped = await new Promise<boolean>((resolveProbe, reject) => {
+        const socket = createConnection({ host: "127.0.0.1", port });
+        socket.once("connect", () => { socket.destroy(); resolveProbe(false); });
+        socket.once("error", (error: NodeJS.ErrnoException) => {
+          if (error.code === "ECONNREFUSED") resolveProbe(true); else reject(error);
+        });
+      });
     }
     expect(stopped).toBe(true);
   } finally {
