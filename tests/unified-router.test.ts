@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { UnifiedRouter, bindHeaderIdentity, normalizeUnifiedApiInput, type UnifiedManifest, type UnifiedRoutingState } from "../src/unified-router";
+import { VERSION } from "../src/version";
 import { decodeCompactionSummary, encodeCompactionSummary } from "../src/responses/compaction";
 
 const token = "local-control-credential-with-32-characters";
 function manifest(): UnifiedManifest {
   const row = (slug: string, route: object) => ({ slug, supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], cpp_route: route });
-  return { schemaVersion: 1, ccwVersion: "5.0.5", revision: "revision-1",
+  return { schemaVersion: 1, ccwVersion: VERSION, revision: "revision-1",
     profiles: ["a", "b"].map(id => ({ id, name: id, protocol: "responses", models: [`cpp/${id}/model`] })),
     groups: ["g1", "g2"].map(id => ({ id, name: id, strategy: "requestRoundRobin", members: [{ relayId: "a", weight: 1 }, { relayId: "b", weight: 2 }] })),
     models: [row("cpp/a/model", { kind: "api", profileId: "a", model: "model" }), row("cpp/b/model", { kind: "api", profileId: "b", model: "model" }),

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { extractCodexTurnIdentityFromBody } from "./adapters/chatgpt-web/environment";
+import { VERSION } from "./version";
 import {
   COMPACT_PROMPT, SUMMARY_PREFIX, buildCompactV1Output, decodeCompactionSummary,
   encodeCompactionSummary, extractCompactUserMessages,
@@ -46,7 +47,7 @@ export interface UnifiedRouterOptions {
 
 export function validateUnifiedManifest(value: unknown): UnifiedManifest {
   const manifest = value as UnifiedManifest;
-  if (!manifest || manifest.schemaVersion !== 1 || manifest.ccwVersion !== "5.0.5"
+  if (!manifest || manifest.schemaVersion !== 1 || manifest.ccwVersion !== VERSION
     || typeof manifest.revision !== "string" || !manifest.revision
     || !Array.isArray(manifest.models) || !Array.isArray(manifest.profiles) || !Array.isArray(manifest.groups)
     || manifest.models.length > 20_000 || manifest.profiles.length > 1_000 || manifest.groups.length > 1_000) {

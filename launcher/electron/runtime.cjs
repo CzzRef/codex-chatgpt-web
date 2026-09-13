@@ -8,6 +8,7 @@ const {
   connectorNameForDevSetup,
   connectorNameForSetup,
   CURRENT_CONNECTOR_NAME,
+  DEV_CONNECTOR_NAME,
   isLegacyConnectorName,
   requireCurrentRuntimeConnectorName,
   validateConnectorName,
@@ -923,11 +924,7 @@ class RuntimeHost {
   }
 
   setupConnectorName() {
-    const current = this.runtimeConfigSnapshot();
-    if (typeof current.config?.automaticAppName === "string" && current.config.automaticAppName.trim()) {
-      return validateConnectorName(current.config.automaticAppName);
-    }
-    return this.browserConnectorName();
+    return this.launcherProfile === "development" ? DEV_CONNECTOR_NAME : CURRENT_CONNECTOR_NAME;
   }
 
   cancelActiveTurns() {
@@ -1016,7 +1013,6 @@ class RuntimeHost {
       "--acknowledge-unofficial",
       "--restart-service",
     ];
-    if (mode === "full") args.push("--app-name", this.setupConnectorName());
     const result = await this.runSetup("core-setup", args, {
       message: "Installing ChatGPT Web models into Codex",
       successMessage: "Codex integration installed",
@@ -1047,7 +1043,6 @@ class RuntimeHost {
       }),
       "--acknowledge-unofficial",
     ];
-    if (mode === "full") args.push("--app-name", this.setupConnectorName());
     const result = await this.runDevSetup("dev-profile-setup", args, {
       message: "Configuring the isolated DEV harness",
       successMessage: "Isolated DEV harness configured",
@@ -1075,7 +1070,6 @@ class RuntimeHost {
         contextFlag,
       ];
       if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
-      if (mode === "full") args.push("--app-name", this.setupConnectorName());
       const result = await this.runDevSetup("bigger-context", args, {
         message: enabled ? "Enabling Bigger Context" : "Disabling Bigger Context",
         successMessage: enabled ? "Bigger Context enabled" : "Standard context restored",
@@ -1095,7 +1089,6 @@ class RuntimeHost {
       contextFlag,
     ];
     if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
-    if (mode === "full") args.push("--app-name", this.setupConnectorName());
     const result = await this.runSetup("bigger-context", args, {
       message: enabled ? "Enabling Bigger Context" : "Disabling Bigger Context",
       successMessage: enabled ? "Bigger Context enabled; restart Codex" : "Standard context restored; restart Codex",
@@ -1119,8 +1112,6 @@ class RuntimeHost {
       "--browser-host-descriptor",
       this.browserDescriptorPath,
       ...this.browserInteractionArgs({ mode: "manual" }),
-      "--app-name",
-      this.setupConnectorName(),
       "--acknowledge-unofficial",
       "--standard-context",
       profileFlag,
@@ -1182,9 +1173,6 @@ class RuntimeHost {
       "--acknowledge-unofficial",
       "--restart-service",
     ];
-    if (existing.mode === "full") {
-      args.push("--app-name", this.setupConnectorName());
-    }
     const result = await this.runSetup("runtime-upgrade", args, {
       message: tunnelProfileMigrationRequired
         ? `Separating ${interactionMode === "manual" ? "Zero Risk" : "Automatic"} MCP credentials`
@@ -1221,8 +1209,6 @@ class RuntimeHost {
       "--browser-host-descriptor",
       this.browserDescriptorPath,
       ...this.browserInteractionArgs({ mode: targetMode }),
-      "--app-name",
-      this.setupConnectorName(),
       "--replace-codex-route",
     ];
     if (reuseSavedCredentials) {
@@ -1275,8 +1261,6 @@ class RuntimeHost {
       "--browser-host-descriptor",
       this.browserDescriptorPath,
       ...this.browserInteractionArgs({ mode: targetMode }),
-      "--app-name",
-      this.setupConnectorName(),
       "--acknowledge-unofficial",
     ];
     if (reuseSavedCredentials) {
@@ -1325,7 +1309,6 @@ class RuntimeHost {
         : "--standard-context",
     ];
     if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
-    if (current.mode === "full") args.push("--app-name", this.setupConnectorName());
     const options = {
       message: mode === "manual"
         ? "Enabling Zero Risk"

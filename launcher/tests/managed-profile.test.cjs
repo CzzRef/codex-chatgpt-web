@@ -13,7 +13,7 @@ test("managed helper uses a distinct browser partition and private durable paths
 });
 
 test("managed helper refuses setup and process ownership before touching runtime state", async () => {
-  const app = { getPath: () => "/private/cpp-web/launcher", getVersion: () => "5.0.5" };
+  const app = { getPath: () => "/private/cpp-web/launcher", getVersion: () => "5.0.6" };
   const options = { app, logger: { info() {}, warn() {}, error() {} }, sourceRoot: "/fixture", coreHome: "/private/cpp-web", launcherProfile: "managed", browserDescriptorPath: "/private/cpp-web/runtime/browser.json" };
   const supervisor = new RuntimeSupervisor(options);
   const host = new RuntimeHost({ ...options, supervisor });
@@ -38,7 +38,7 @@ test("managed browser operations require the descriptor credential and an exact 
 
 test("managed Full MCP browser can start before tunnel setup without weakening standalone validation", () => {
   const descriptor = "/private/cpp-web/runtime/browser.json";
-  const config = { version: 3, purpose: "managed", releaseVersion: "5.0.5", mode: "full", browserHost: "launcher",
+  const config = { version: 3, purpose: "managed", releaseVersion: "5.0.6", mode: "full", browserHost: "launcher",
     browserHostDescriptorPath: descriptor, host: "127.0.0.1", port: 17841, controlToken: "a".repeat(64),
     contextWindow: 128000, appName: "Codex Native2", chromeExecutablePath: "/fixture/chrome", storageStatePath: "/private/cpp-web/browser/state.json",
     brokerSocketPath: "/private/cpp-web/runtime/broker.sock", headed: true, solAvailable: true, proAvailable: false,

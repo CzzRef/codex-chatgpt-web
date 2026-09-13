@@ -7,9 +7,10 @@ import { closeTurnBrokers } from "../src/adapters/chatgpt-web/turn-broker";
 import { startServer } from "../src/server";
 import { UnifiedRouter, type UnifiedManifest } from "../src/unified-router";
 import { buildManagedAppConfig, readManagedLaunchConfig, type ManagedLaunchConfig } from "../src/managed";
+import { VERSION } from "../src/version";
 
 const token = "a-private-fixture-control-token-over-32-chars";
-const manifest: UnifiedManifest = { schemaVersion: 1, ccwVersion: "5.0.5", revision: "fixture",
+const manifest: UnifiedManifest = { schemaVersion: 1, ccwVersion: VERSION, revision: "fixture",
   profiles: [{ id: "p", name: "Fixture", protocol: "responses", models: ["cpp/p/model"] }], groups: [],
   models: [{ slug: "cpp/p/model", supported_reasoning_levels: [{ effort: "high" }], cpp_route: { kind: "api", profileId: "p", model: "model" } }] };
 const completed = () => Response.json({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "fixture" }] }] });
@@ -81,7 +82,7 @@ test("HTTP drain and exact-turn interrupt cancel the managed executor stream", a
 
 test("managed launch contract pins private transport and rejects incompatible owners", () => {
   const root = mkdtempSync(join(tmpdir(), "cpp-managed-contract-"));
-  const launch: ManagedLaunchConfig = { schemaVersion: 1, owner: "codex-plusplus", ccwVersion: "5.0.5", profileDir: root,
+  const launch: ManagedLaunchConfig = { schemaVersion: 1, owner: "codex-plusplus", ccwVersion: VERSION, profileDir: root,
     apiBase: "http://127.0.0.1:57321", port: 17841, subagentProtocol: "native", runtimeCommand: [process.execPath, join(root, "cli.js")] };
   const file = join(root, "managed-launch.json");
   try {
