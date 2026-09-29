@@ -6,9 +6,9 @@ import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
 import {
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
-  cancelStructuredCompactionTrace,
+  beginCancelStructuredCompactionTrace,
 } from "./adapters/chatgpt-web/compaction-handoff";
-import { chatGptBrowserTabClosedError } from "./adapters/chatgpt-web/adapter-error";
+import { ChatGptWebAdapterError, chatGptBrowserTabClosedError } from "./adapters/chatgpt-web/adapter-error";
 import {
   CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
   extractChatGptTurnIdentity,
@@ -36,6 +36,7 @@ import {
   type ChatGptWebModelRoute,
 } from "./chatgpt-web-models";
 import { forwardNativeCodexRequest, type NativeFetch, type NativeImageEndpoint } from "./native-passthrough";
+import { fetchNativeCodex } from "./native-network";
 import {
   buildCompactV1Output,
   COMPACT_PROMPT,
@@ -362,7 +363,9 @@ export interface ResponseRequestOptions {
 }
 
 export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppConfig): ChatGptWebModelRoute {
-  const route = requireChatGptWebModelRoute(parsed.modelId, config);
+  const route = requireChatGptWebModelRoute(parsed.modelId, config, parsed.options.reasoning);
+  if (route.interactionMode === "automatic" && route.modelFamily) parsed._chatgptModelFamily = route.modelFamily;
+  else delete parsed._chatgptModelFamily;
   parsed.modelId = route.backendModel;
   // Zero Risk preserves a distinct backend identity. Its immutable Codex effort is only a
   // protocol/catalog value; the manual adapter must never reinterpret it as a ChatGPT selection.
@@ -372,23 +375,54 @@ export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppCo
   return route;
 }
 
+interface ModelCatalogFailure {
+  stage: "config" | "request" | "transport" | "upstream" | "catalog";
+  code?: string;
+}
+
+function modelCatalogFailure(stage: ModelCatalogFailure["stage"], error: unknown): ModelCatalogFailure {
+  if (!error || typeof error !== "object") return { stage };
+  // Fetch can wrap the network error. Keep only bounded codes, never free-form
+  // messages, URLs or paths from either layer in the health snapshot.
+  for (const source of [error, "cause" in error ? error.cause : undefined]) {
+    const code = source && typeof source === "object" && "code" in source ? source.code : undefined;
+    if (typeof code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(code)) return { stage, code };
+  }
+  const name = "name" in error ? error.name : undefined;
+  // AbortError identifies cancellation, not who initiated it. The upstream request
+  // can also be cancelled by the server, so do not blame the Codex client here.
+  if (name === "AbortError") return { stage, code: "ABORT_ERR" };
+  if (name === "TimeoutError") return { stage, code: "ETIMEDOUT" };
+  return { stage };
+}
+
 export async function modelsRequest(
   req: Request,
   config: AppConfig,
   fetchUpstream?: NativeFetch,
   contextOverride?: () => CodexModelContextOverride | undefined,
+  onFailure?: (failure: ModelCatalogFailure) => void,
 ): Promise<Response> {
   let upstream: Response;
+  let sent = false;
   try {
-    upstream = await forwardNativeCodexRequest(req, "models", fetchUpstream);
+    upstream = await forwardNativeCodexRequest(req, "models", input => {
+      sent = true;
+      return (fetchUpstream ?? fetchNativeCodex)(input);
+    });
   } catch (error) {
+    onFailure?.(modelCatalogFailure(sent ? "transport" : "request", error));
     return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
   }
-  if (!upstream.ok) return upstream;
+  if (!upstream.ok) {
+    onFailure?.({ stage: "upstream" });
+    return upstream;
+  }
   let catalog: Record<string, unknown>;
   try {
     catalog = augmentNativeModelCatalog(await upstream.json(), config, contextOverride?.());
   } catch (error) {
+    onFailure?.(modelCatalogFailure("catalog", error));
     return formatErrorResponse(502, "invalid_response_error", error instanceof Error ? error.message : String(error));
   }
   const body = JSON.stringify(catalog);
@@ -511,6 +545,7 @@ export async function responseRequest(
   }
 
   const compaction = parsed._compactionRequest === true;
+  const compactionItem = compaction && parsed._compactionResponseFormat !== "message";
   const rememberCompletedResponse = (response: Record<string, unknown>): void => {
     if (!compaction) {
       if (options.rememberState !== false) rememberResponseState(parsed._rawBody, response, { force: true });
@@ -518,10 +553,16 @@ export async function responseRequest(
     }
     if (response.status !== "completed") return;
     const identity = extractChatGptTurnIdentity(parsed);
-    if (!identity.threadId || !identity.turnId || !Array.isArray(response.output) || response.output.length !== 1) return;
-    const item = response.output[0];
-    if (item?.type !== "compaction" || typeof item.encrypted_content !== "string") return;
-    const summary = decodeCompactionSummary(item.encrypted_content);
+    if (!identity.threadId || !identity.turnId || !Array.isArray(response.output)) return;
+    const items = response.output.filter(item => item?.type === (compactionItem ? "compaction" : "message"));
+    if (items.length !== 1 || (compactionItem && response.output.length !== 1)) return;
+    const item = items[0];
+    const summary = compactionItem
+      ? (typeof item?.encrypted_content === "string" ? decodeCompactionSummary(item.encrypted_content) : null)
+      : (item?.role === "assistant" && Array.isArray(item.content)
+        ? item.content.filter((part: { type?: string; text?: unknown }) => part.type === "output_text" && typeof part.text === "string")
+          .map((part: { text: string }) => part.text).join("")
+        : null);
     if (!summary) return;
     const source = extractChatGptCompactionSourceRevision(parsed);
     const body = parsed._rawBody as { input?: unknown[] };
@@ -623,7 +664,7 @@ export async function responseRequest(
         ...(provider.chatgptWeb?.stallTimeoutSec !== undefined
           ? { stallTimeoutSec: provider.chatgptWeb.stallTimeoutSec }
           : {}),
-        ...(compaction ? { compaction: true } : {}),
+        ...(compactionItem ? { compaction: true } : {}),
         onCompletedResponse: rememberCompletedResponse,
       },
     );
@@ -644,7 +685,7 @@ export async function responseRequest(
     toolNsMap: maps.toolNsMap,
     freeformToolNames: maps.freeformToolNames,
     toolSearchToolNames: maps.toolSearchToolNames,
-    ...(compaction ? { compaction: true } : {}),
+    ...(compactionItem ? { compaction: true } : {}),
   });
   rememberCompletedResponse(json);
   return Response.json(json);
@@ -787,6 +828,10 @@ export function startServer(
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
   let lastSuccessfulModelCatalogRequestAt: string | null = null;
+  let modelCatalogRequests = 0;
+  let lastModelCatalogResult: {
+    request: number; at: string; status: number; failure?: ModelCatalogFailure;
+  } | null = null;
   const httpTurns = new HttpTurnCounter();
   const activity = () => ({
     active_http_turns: httpTurns.count(),
@@ -816,6 +861,8 @@ export function startServer(
           accepting_turns: !draining,
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
+          model_catalog_requests: modelCatalogRequests,
+          last_model_catalog_result: lastModelCatalogResult,
           ...activity(),
         });
       }
@@ -828,32 +875,48 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/admin/cancel-turn") {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
         let traceId: string;
+        let leaseFailure: "browser_surface_bootstrap_timeout" | "helper_heartbeat_expired" | undefined;
         try {
-          const body = await req.json() as { traceId?: unknown };
+          const body = await req.json() as { traceId?: unknown; reason?: unknown };
           traceId = typeof body?.traceId === "string" ? body.traceId : "";
           if (!/^[A-Za-z0-9_-]{6,128}$/.test(traceId)) throw new Error("traceId is invalid");
+          if (body.reason !== undefined) {
+            if (body.reason !== "browser_surface_bootstrap_timeout" && body.reason !== "helper_heartbeat_expired") {
+              throw new Error("Browser turn cancellation reason is invalid");
+            }
+            leaseFailure = body.reason;
+          }
         } catch (error) {
           return Response.json(
             { status: "error", error: error instanceof Error ? error.message : String(error) },
             { status: 400 },
           );
         }
-        const reason = chatGptBrowserTabClosedError();
+        const reason = leaseFailure
+          ? new ChatGptWebAdapterError(
+            leaseFailure === "browser_surface_bootstrap_timeout"
+              ? "The ChatGPT browser turn did not finish browser setup before its lease expired. The turn was stopped."
+              : "The ChatGPT browser helper stopped reporting progress and its lease expired. The turn was stopped.",
+            { status: 504, errorType: "server_error", code: leaseFailure, retryable: false },
+          )
+          : chatGptBrowserTabClosedError();
         // Revoke the owner first. This prevents a compaction callback that observes its retained
         // source being cancelled below from starting a fresh fallback during operator shutdown.
-        const compactionCancellation = cancelStructuredCompactionTrace(traceId, reason);
-        const browserCancellation = chatGptTurnSessions.cancelTrace(traceId, reason);
-        const [cancelledBrowserTurns, cancelledCompactionRuns] = await Promise.all([
-          browserCancellation,
-          compactionCancellation,
-        ]);
+        const compactionCancellation = beginCancelStructuredCompactionTrace(traceId, reason);
+        const browserCancellation = chatGptTurnSessions.beginCancelTrace(traceId, reason);
         const cancelledBrokerTurns = turnBroker?.revokeTrace(traceId, reason) ?? 0;
+        const settlement = Promise.all([browserCancellation.settlement, compactionCancellation.settlement]);
+        // Explicit tab close acknowledges revoked authority, then destroys its document. Waiting
+        // for that document's helper first can deadlock the UI behind a stalled browser operation.
+        // Lease cleanup still requires physical settlement before declaring the runtime idle.
+        if (leaseFailure) await settlement;
+        else void settlement.catch(error => console.error(`[chatgpt-web] cancelled turn cleanup failed: ${error instanceof Error ? error.message : String(error)}`));
         return Response.json({
           status: "ok",
           trace_id: traceId,
-          cancelled_browser_turns: cancelledBrowserTurns,
+          cancelled_browser_turns: browserCancellation.cancelled,
           cancelled_broker_turns: cancelledBrokerTurns,
-          cancelled_compaction_runs: cancelledCompactionRuns,
+          cancelled_compaction_runs: compactionCancellation.cancelled,
           ...activity(),
         });
       }
@@ -952,6 +1015,19 @@ export function startServer(
           );
         }
         return httpTurns.track(async signal => {
+          const request = ++modelCatalogRequests;
+          const started = Date.now();
+          const recordResult = (response: Response, failure?: ModelCatalogFailure): Response => {
+            const result = { request, at: new Date().toISOString(), status: response.status, ...(failure ? { failure } : {}) };
+            // An older, slower request must not replace a newer completed result.
+            if (!lastModelCatalogResult || request > lastModelCatalogResult.request) lastModelCatalogResult = result;
+            if (!response.ok) {
+              try {
+                console.warn(`[codex-chatgpt-web] model_catalog_failed ${JSON.stringify({ ...result, elapsedMs: Date.now() - started })}`);
+              } catch { /* Logging must not replace the catalog result. */ }
+            }
+            return response;
+          };
           let catalogConfig: AppConfig;
           try {
             catalogConfig = {
@@ -959,23 +1035,25 @@ export function startServer(
               subagentProtocol: readCodexSubagentProtocol(config.subagentProtocol),
             };
           } catch (error) {
-            return formatErrorResponse(
+            return recordResult(formatErrorResponse(
               500,
               "server_error",
               `Could not resolve the installed subagent protocol: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            ), modelCatalogFailure("config", error));
           }
+          let failure: ModelCatalogFailure | undefined;
           const response = await modelsRequest(
             new Request(req, { signal }),
             catalogConfig,
             dependencies.fetchUpstream,
             readCodexModelContextOverride,
+            value => { failure = value; },
           );
           if (response.ok) {
             successfulModelCatalogRequests += 1;
             lastSuccessfulModelCatalogRequestAt = new Date().toISOString();
           }
-          return response;
+          return recordResult(response, failure);
         }, req.signal, process.platform, "models");
       }
       if (req.method === "GET" && url.pathname === "/v1/responses") {
