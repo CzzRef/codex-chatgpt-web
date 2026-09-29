@@ -348,6 +348,13 @@ export function createChatGptWebAdapter(
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
   const timeoutMs = provider.chatgptWeb?.turnTimeoutMs;
+  const experimentalSkillAttachments = provider.chatgptWeb?.experimentalSkillAttachments;
+  if (experimentalSkillAttachments !== undefined && typeof experimentalSkillAttachments !== "boolean") {
+    throw new Error("ChatGPT skill attachments preference must be a boolean");
+  }
+  if (experimentalSkillAttachments && provider.chatgptWeb?.browserInteractionMode === "manual") {
+    throw new Error("Skills as files is unavailable in Zero Risk mode");
+  }
   const experimentalBiggerContext = provider.chatgptWeb?.experimentalBiggerContext;
   if (experimentalBiggerContext !== undefined && typeof experimentalBiggerContext !== "boolean") {
     throw new Error("ChatGPT Bigger Context preference must be a boolean");
@@ -355,9 +362,18 @@ export function createChatGptWebAdapter(
   const configuredCapabilities: ChatGptWebCapabilities = {
     localToolsEnabled: provider.chatgptWeb?.localToolsEnabled === true,
     solAvailable: provider.chatgptWeb?.solAvailable !== false,
+    extraHighAvailable: provider.chatgptWeb?.extraHighAvailable === true,
     proAvailable: provider.chatgptWeb?.proAvailable === true,
   };
   const manualInteraction = provider.chatgptWeb?.browserInteractionMode === "manual";
+  const freshConversationPerTurn = provider.chatgptWeb?.experimentalFreshConversationPerTurn === true;
+  if (provider.chatgptWeb?.experimentalFreshConversationPerTurn !== undefined
+    && typeof provider.chatgptWeb.experimentalFreshConversationPerTurn !== "boolean") {
+    throw new Error("ChatGPT fresh conversation preference must be a boolean");
+  }
+  if (freshConversationPerTurn && manualInteraction) {
+    throw new Error("Fresh browser conversations per turn is available only in automatic mode");
+  }
   const executionNamespace = chatGptWebExecutionNamespace(provider);
   const retainedLauncherDescriptor = provider.chatgptWeb?.browserHost === "launcher"
     && provider.chatgptWeb.browserHostDescriptorPath
@@ -413,6 +429,7 @@ export function createChatGptWebAdapter(
       ? lunaCheckpointStore.apply(parsed)
       : { parsed, applied: false };
     const conversationKey = !parsed._compactionRequest
+      && !freshConversationPerTurn
       && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
       && mode.localTools
       && retainedLauncherDescriptor
@@ -430,10 +447,11 @@ export function createChatGptWebAdapter(
     const compileOptionsFor = (input: CodexParsedRequest) => {
       if (manualRequest) return {};
       const experimentalMultipartParts = experimentalBiggerContext
-        ? resolveBiggerContextMultipartParts(input, turnCapabilities)
+        ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments)
         : undefined;
       return {
         captureLunaCheckpoint,
+        experimentalSkillAttachments,
         ...(experimentalMultipartParts !== undefined
           ? { experimentalMultipartParts }
           : {}),
@@ -557,7 +575,7 @@ export function createChatGptWebAdapter(
           if (!parsed._compactionRequest) {
             trace.push({
               kind: "commentary",
-              text: "> **Action required in Zero Risk**\n>\n> Open the launcher, copy and paste the prompt into ChatGPT, add any images yourself because Zero Risk cannot transfer them, select the `Codex Zero Risk` plugin and the model you want, send the prompt, then confirm it was sent in the launcher.",
+              text: "> **Action required in Zero Risk**\n>\n> Open the launcher, copy and paste the prompt into ChatGPT, add any images yourself because Zero Risk cannot transfer them, select the plugin shown in the launcher and the model you want, send the prompt, then confirm it was sent in the launcher.",
             });
           }
           await zeroRiskManualControl.start(retainedLauncherDescriptor, {
@@ -575,7 +593,7 @@ export function createChatGptWebAdapter(
           submission.phase = "accepted";
           if (!parsed._compactionRequest) trace.push({
             kind: "commentary",
-            text: "> **Waiting for ChatGPT**\n>\n> The prompt is marked `Sent`. Waiting for `Codex Zero Risk` to bind this turn through the selected ChatGPT connector.",
+            text: "> **Waiting for ChatGPT**\n>\n> The prompt is marked `Sent`. Waiting for the selected ChatGPT plugin to connect.",
           });
           const terminalAbort = new AbortController();
           const abortTerminal = () => terminalAbort.abort();
@@ -597,7 +615,7 @@ export function createChatGptWebAdapter(
             await zeroRiskManualControl.markStarted(retainedLauncherDescriptor, owner);
             if (!parsed._compactionRequest) trace.push({
               kind: "commentary",
-              text: "> **Zero Risk connected**\n>\n> `Codex Zero Risk` is connected. ChatGPT is now working through the native Codex harness; progress remains visible in the launcher.",
+              text: "> **Zero Risk connected**\n>\n> The Zero Risk plugin is connected. ChatGPT is now working through the native Codex harness; progress remains visible in the launcher.",
             });
             answer = await Promise.race([
               broker.waitForSafeCompletion(activeToken, browserAbort.signal),
@@ -673,6 +691,7 @@ export function createChatGptWebAdapter(
         traceId,
         modelId: parsed.modelId,
         reasoning: parsed.options.reasoning,
+        ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
         capabilities: turnCapabilities,
         prepare: async () => ({
           ...compileChatGptWebPrompt(
@@ -743,6 +762,7 @@ export function createChatGptWebAdapter(
       traceId,
       modelId: parsed.modelId,
       reasoning: parsed.options.reasoning,
+      ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
       capabilities: turnCapabilities,
       prepare: () => prepareWith(checkpointInput.parsed),
       ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput) } : {}),
@@ -877,6 +897,7 @@ export function createChatGptWebAdapter(
               .update(compactionExecutionKey)
               .digest("hex")
               .slice(0, 12);
+            const freshCompactionTraceId = `${handoffTraceId}_${freshConversationPerTurn ? "fresh" : "fallback"}`;
             const compactionNativeIdentity = extractChatGptTurnIdentity(parsed);
             let sharedSummary = existingStructuredCompactionRun(compactionExecutionKey);
             if (!sharedSummary) {
@@ -887,7 +908,7 @@ export function createChatGptWebAdapter(
                   traceIds: [
                     compactionTraceId,
                     handoffTraceId,
-                    `${handoffTraceId}_fallback`,
+                    freshCompactionTraceId,
                   ],
                   ...(compactionNativeIdentity.threadId
                     ? { nativeThreadId: compactionNativeIdentity.threadId }
@@ -924,16 +945,17 @@ export function createChatGptWebAdapter(
                   armHandoffDeadline();
                   const operationSignal = AbortSignal.any([operatorSignal, handoffDeadline.signal]);
                   const sourceConversationKey = chatGptConversationKey(parsed, executionNamespace);
-                  const runFreshCompactionFallback = async (reason: string): Promise<string> => {
-                    console.warn(`[chatgpt-web] retained compaction fallback=${reason}`);
-                    // The fallback is a new bounded phase. Each exact multipart acknowledgement
+                  const runFreshCompaction = async (reason: string): Promise<string> => {
+                    if (freshConversationPerTurn) console.info("[chatgpt-web] compaction uses configured fresh conversation mode");
+                    else console.warn(`[chatgpt-web] retained compaction fallback=${reason}`);
+                    // Fresh compaction is a bounded phase. Each exact multipart acknowledgement
                     // and the final accepted compact prompt re-arms the five-minute liveness budget;
                     // transport time cannot consume the model-generation window.
                     armHandoffDeadline();
                     const fallbackRuntime = startRuntime(
                       parsed,
                       manualRequest ? environment : undefined,
-                      `${handoffTraceId}_fallback`,
+                      freshCompactionTraceId,
                       turnCapabilities,
                       { onCompactionProgress: armHandoffDeadline },
                     );
@@ -952,6 +974,18 @@ export function createChatGptWebAdapter(
                   let source: ChatGptTurnSession | undefined;
                   let preserveFinalResponse = false;
                   try {
+                    if (freshConversationPerTurn) {
+                      // Full native history is the compaction input. Release an unfinished
+                      // browser/tool owner before rebuilding it, but keep a committed final
+                      // replayable if it won the native compaction race.
+                      const previous = chatGptTurnSessions.find(compactedSourceExecutionKey);
+                      const settlement = previous?.settledOutcome()?.type === "final"
+                        ? previous.physicalSettlement
+                        : chatGptTurnSessions.retireAndWait(compactedSourceExecutionKey).then(() => {});
+                      retainOwnershipUntil(settlement);
+                      await withAbort(settlement, operationSignal);
+                      return await runFreshCompaction("configured_fresh_conversation");
+                    }
                     // The previous compaction may already have detached the retained head while
                     // its browser/helper is still unwinding. Do not inspect that old epoch or
                     // decide to open a fresh fallback until physical release has completed.
@@ -968,7 +1002,7 @@ export function createChatGptWebAdapter(
                       && source?.settledOutcome()?.type === "final";
                     const retainedKey = source?.conversationKey();
                     if (!source || !retainedKey) {
-                      return await runFreshCompactionFallback("source_unavailable_before_handoff");
+                      return await runFreshCompaction("source_unavailable_before_handoff");
                     }
                     let rawSummary: string;
                     if (manualRequest && source.isActive() && source.runtime.mode === "tools") {
@@ -980,7 +1014,7 @@ export function createChatGptWebAdapter(
                       );
                       if (zeroRiskSummary === undefined) {
                         preserveFinalResponse = true;
-                        rawSummary = await runFreshCompactionFallback("zero_risk_source_had_no_compaction_boundary");
+                        rawSummary = await runFreshCompaction("zero_risk_source_had_no_compaction_boundary");
                       } else {
                         rawSummary = zeroRiskSummary;
                       }
@@ -991,7 +1025,7 @@ export function createChatGptWebAdapter(
                         await withAbort(source.physicalSettlement, operationSignal);
                         preserveFinalResponse = true;
                       }
-                      rawSummary = await runFreshCompactionFallback("zero_risk_source_already_completed");
+                      rawSummary = await runFreshCompaction("zero_risk_source_already_completed");
                     } else if (source.isActive() && source.runtime.mode === "tools") {
                       const settlement = await settleActiveCompactionSource(
                         parsed,
@@ -1062,7 +1096,7 @@ export function createChatGptWebAdapter(
                     }
                     if (handoffError instanceof ChatGptWebAdapterError
                       && handoffError.code === "compaction_source_unavailable") {
-                      return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                      return await runFreshCompaction("source_disappeared_before_handoff");
                     }
                     throw handoffError;
                   } finally {
@@ -1085,12 +1119,15 @@ export function createChatGptWebAdapter(
               }
               const handoffError = error instanceof Error ? error : new Error(String(error));
               console.error("[chatgpt-web] structured context handoff failed:", handoffError);
+              const upstreamError = handoffError instanceof ChatGptWebAdapterError ? handoffError : undefined;
               emit({
                 type: "error",
-                message: "ChatGPT did not complete the context handoff. Retry the task.",
-                status: 409,
-                errorType: "invalid_request_error",
-                code: "compaction_handoff_failed",
+                message: upstreamError?.message ?? "ChatGPT did not complete the context handoff. Retry the task.",
+                status: upstreamError?.status ?? 409,
+                errorType: upstreamError?.errorType ?? "invalid_request_error",
+                code: upstreamError?.code ?? "compaction_handoff_failed",
+                // Compaction retry remains an explicit operator decision even when its source
+                // failure was retryable; preserve the cause without opening a new retry loop.
                 retryable: false,
               });
               return;
@@ -1098,7 +1135,7 @@ export function createChatGptWebAdapter(
             emit({ type: "text_delta", text: summary, phase: "final_answer" });
             emitBrowserCompletion(
               { type: "final", answer: summary },
-              estimateChatGptWebUsage(parsed, { answer: summary, reasoning: [] }, turnCapabilities, experimentalBiggerContext),
+              estimateChatGptWebUsage(parsed, { answer: summary, reasoning: [] }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
               emit,
             );
             chatGptWebTurnRetryPolicy.clear(retryKey);
@@ -1191,7 +1228,7 @@ export function createChatGptWebAdapter(
               session.setFinalEvents(session.roundEvents(roundKey));
               emitRoundBatch(buffer => emitBrowserCompletion(
                 settled,
-                estimateChatGptWebUsage(currentUsageInput(parsed), { answer: settled.answer, reasoning }, turnCapabilities, experimentalBiggerContext),
+                estimateChatGptWebUsage(currentUsageInput(parsed), { answer: settled.answer, reasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                 buffer,
               ));
               session.completeRound(roundKey);
@@ -1213,7 +1250,7 @@ export function createChatGptWebAdapter(
                   if (replay.length === 0) emitRoundEvents(session.eventsForOutstandingReplay());
                   emitRoundBatch(buffer => emitToolBatch(
                     outstanding,
-                    estimateChatGptWebUsage(currentUsageInput(parsed), { reasoning, toolRequests: outstanding }, turnCapabilities, experimentalBiggerContext),
+                    estimateChatGptWebUsage(currentUsageInput(parsed), { reasoning, toolRequests: outstanding }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                     buffer,
                   ));
                   session.completeRound(roundKey);
@@ -1297,7 +1334,7 @@ export function createChatGptWebAdapter(
                 }
                 emitRoundBatch(buffer => emitBrowserCompletion(
                   completedOutcome,
-                  estimateChatGptWebUsage(currentUsageInput(parsed), { answer: completedOutcome.answer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext),
+                  estimateChatGptWebUsage(currentUsageInput(parsed), { answer: completedOutcome.answer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                   buffer,
                 ));
                 session.completeRound(roundKey);
@@ -1355,7 +1392,7 @@ export function createChatGptWebAdapter(
                 session.setOutstanding(next.requests, roundReasoning, session.roundEvents(roundKey));
                 emitRoundBatch(buffer => emitToolBatch(
                   next.requests,
-                  estimateChatGptWebUsage(currentUsageInput(parsed), { reasoning: roundReasoning, toolRequests: next.requests }, turnCapabilities, experimentalBiggerContext),
+                  estimateChatGptWebUsage(currentUsageInput(parsed), { reasoning: roundReasoning, toolRequests: next.requests }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                   buffer,
                 ));
                 session.completeRound(roundKey);

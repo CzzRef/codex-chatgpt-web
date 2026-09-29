@@ -22,8 +22,55 @@ import {
   waitForLauncherManualTerminal,
 } from "../src/launcher-browser-host";
 import type { Browser, BrowserContext, Page } from "playwright-core";
+import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 
 const roots: string[] = [];
+
+test("a blocked sign-in replaces an opaque navigation abort with a non-retryable session error", async () => {
+  let needsSignIn: unknown = true;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+    const activity = await req.json() as { phase: string };
+    return Response.json(activity.phase === "start"
+      ? { surfaceId: "a".repeat(32), reused: false, connectorBound: false }
+      : { cancelledByUser: false, authenticationRequired: needsSignIn });
+  } });
+  try {
+    const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
+    const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+      config: { browserHost: "launcher", browserHostDescriptorPath: descriptor },
+      runBrowserTurn: async () => { throw new Error("page.goto: net::ERR_ABORTED"); },
+    });
+    const turn = { traceId: "auth-redirect", capabilities: { localToolsEnabled: false } };
+    await expect(worker.runExclusive(turn)).rejects.toMatchObject({
+      status: 401, code: "chatgpt_sign_in_required", retryable: false,
+    });
+    needsSignIn = false;
+    await expect(worker.runExclusive(turn)).rejects.toThrow("page.goto: net::ERR_ABORTED");
+    needsSignIn = "true";
+    await expect(notifyLauncherTurn(descriptor, { phase: "end", traceId: "auth-redirect", helperPid: process.pid, status: "failed" }))
+      .rejects.toThrow("invalid authentication state");
+  } finally { server.stop(true); }
+});
+
+test("startup waits beyond five seconds and distinguishes its deadline from caller cancellation", async () => {
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch() {
+    calls++;
+    await Bun.sleep(calls === 1 ? 5_100 : 80);
+    return Response.json({ surfaceId: "a".repeat(32), reused: false, connectorBound: false });
+  } });
+  try {
+    const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
+    const activity = { phase: "start" as const, traceId: "bounded-start", helperPid: process.pid };
+    await expect(notifyLauncherTurn(descriptor, activity)).resolves.toMatchObject({ reused: false });
+    await expect(notifyLauncherTurn(descriptor, activity, 10)).rejects.toThrow("start timed out after 10ms");
+    const controller = new AbortController();
+    const pending = notifyLauncherTurn(descriptor, activity, undefined, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toBe(3);
+  } finally { server.stop(true); }
+}, 10_000);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -112,6 +159,7 @@ test("launcher turn control sends authenticated lifecycle events", async () => {
       surfaceId: "launcher_surface_id_0123456789AB",
       reused: true,
       connectorBound: true,
+      trackUsage: false,
     });
     expect(received.authorization).toBe("Bearer launcher-control-token-0123456789abcdefghijklmnop");
     expect(received.body).toEqual({
@@ -255,7 +303,7 @@ test("launcher session verification uses the authenticated control channel inste
       authenticated: true,
       temporary: true,
       solAvailable: true,
-      proAvailable: true,
+      extraHighAvailable: true, proAvailable: true,
       url: "https://chatgpt.com/?temporary-chat=true",
     }));
   });
@@ -269,7 +317,7 @@ test("launcher session verification uses the authenticated control channel inste
     const path = descriptorFile(`http://127.0.0.1:${address.port}`);
     expect(await inspectLauncherBrowserHost(path, { detectCapabilities: true })).toEqual({
       solAvailable: true,
-      proAvailable: true,
+      extraHighAvailable: true, proAvailable: true,
       url: "https://chatgpt.com/?temporary-chat=true",
     });
   } finally {
