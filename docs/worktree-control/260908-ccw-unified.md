@@ -2,6 +2,6 @@
 
 Branch: `codex/260908-ccw-unified`; target: `czz-dev`. Paired sources are retained under the Codex++ worktree hub.
 
-Implementation and local verification are complete: 798 affected automated tests and 9 isolated macOS component checks passed. The delivered package is RC2. Source authority: `vibe/specs/260908/1421-ccw-unified/spec.md`; current evidence: `verify.md` beside it.
+`czz-dev` contains upstream `6.1.3` (`3bdf471`). The work branch merged that head at `5fbc29b`. Isolated macOS component smoke for RC5 (Codex++ 1.4.0 × CCW 6.1.3) passed 9/9. Target integration of the work branch back into `czz-dev` remains not started. Nested-depth `AGENTS.md` stays local-dirty.
 
-Local batched submission is complete: 3 commits, HEAD `9ae27fed5a4b4219d69cbbe6b1be6015aa846fef`. The user will perform target account, native UI, Full MCP and Voice acceptance later; these checks remain not_run. There is no installed route activation, target integration or remote push. Both source worktrees are retained; lifecycle observation remains unmanaged.
+Focused checks: CCW managed/unified/cli 81 and launcher 16 passed. Account, Full MCP and Voice acceptance remain not_run. Lifecycle observation remains unmanaged.

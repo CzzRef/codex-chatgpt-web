@@ -16,7 +16,7 @@ Project-owned conditional detail. Edit this local owner for project-specific fac
 
 把 ChatGPT Web（含 Pro）接到官方 Codex 的原生模型选择器。Codex 仍拥有任务、上下文、UI 与工具 harness；本仓提供 loopback Responses 桥、嵌入式浏览器和可选 Full MCP。
 
-栈：Bun 1.4.0 + TypeScript；桌面启动器是 Electron + Vite + React（`launcher/`）。版本以 `package.json` / `src/version.ts` 为准，当前为 `5.0.5`。
+栈：Bun 1.4.0 + TypeScript；桌面启动器是 Electron + Vite + React（`launcher/`）。版本以 `package.json` / `src/version.ts` 为准，当前为 `6.1.3`。
 
 ## 关键事实
 

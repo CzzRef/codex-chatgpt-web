@@ -1,7 +1,7 @@
 # Codex ChatGPT Web Project Status
 
-Tool: codex
-Date: 2026-09-08
+Tool: grok
+Date: 2026-09-29
 
 ## Purpose
 
@@ -15,11 +15,11 @@ Compact process hub for active AI work. This file routes current tasks to projec
 
 ## Current Focus
 
-Unified V0.1 is locally committed in the paired worktrees; the user will carry out real account testing later. See [the delivery record](260908/1421-ccw-unified/changes.md).
+`czz-dev` 已合入上游 6.1.3；本工作分支已合入该头（`5fbc29b`）。RC5 隔离冒烟 9/9；真实账号验收仍 not_run。见 [the delivery record](260908/1421-ccw-unified/changes.md)。
 
 ## Fork Initialization Baseline
 
-- Status: fork cloned to `GitFork/codex-chatgpt-web`; local working branch is `czz-dev` from `origin/main` `0b053b6` (v5.0.5). CodeNote AI rule chain initialized. No application code changed.
+- Status: fork cloned to `GitFork/codex-chatgpt-web`; local working branch is `czz-dev` at upstream `6.1.3`. CodeNote AI rule chain initialized.
 - Latest task docs: [task card](260908/1208-ai-rules-init/task-card.md), [changes](260908/1208-ai-rules-init/changes.md).
 - Remotes: `origin=CzzRef/codex-chatgpt-web`，`upstream=miuuyy/codex-chatgpt-web`. `czz-dev` is local-only; not pushed.
 - CodeNote catalog: `project-index.json` + this-host `workspace.local.json` binding.
@@ -28,7 +28,7 @@ Unified V0.1 is locally committed in the paired worktrees; the user will carry o
 
 | Task | Status | Authoritative Doc | Verification | Notes |
 | --- | --- | --- | --- | --- |
-| Unified V0.1 | `local-committed / unpushed` | [requirements](260908/1421-ccw-unified/spec.md) | [local verification](260908/1421-ccw-unified/verify.md) | user will perform account acceptance later |
+| Unified V0.1 | `merged-local / origin pending` | [requirements](260908/1421-ccw-unified/spec.md) | RC5 smoke 9/9; focused 81 + launcher 16; account `not_run` | work head `5fbc29b` |
 | AI rules init | `implemented-local / gitfork-local-committed / unpushed` | [task-card](260908/1208-ai-rules-init/task-card.md) | project audit 仅余官方短入口 2 条 inherited | no app code |
 
 ## AI Initialization Verification State
