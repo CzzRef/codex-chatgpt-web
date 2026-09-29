@@ -1,7 +1,7 @@
 # Codex ChatGPT Web Project Status
 
-Tool: cursor
-Date: 2026-09-08
+Tool: grok
+Date: 2026-09-29
 
 ## Purpose
 
@@ -15,22 +15,23 @@ Compact process hub for active AI work. This file routes current tasks to projec
 
 ## Current Focus
 
-- Status: fork cloned to `GitFork/codex-chatgpt-web`; local working branch is `czz-dev` from `origin/main` `0b053b6` (v5.0.5). CodeNote AI rule chain initialized. No application code changed.
-- Latest task docs: [task card](260908/1208-ai-rules-init/task-card.md), [changes](260908/1208-ai-rules-init/changes.md).
-- Remotes: `origin=CzzRef/codex-chatgpt-web`，`upstream=miuuyy/codex-chatgpt-web`. `czz-dev` is local-only; not pushed.
-- CodeNote catalog: `project-index.json` + this-host `workspace.local.json` binding.
+- `czz-dev` 已合入上游 `6.1.3`（head `3bdf471`）。配套工作分支 `codex/260908-ccw-unified` 已合入该头（`5fbc29b`）。
+- 统一组件包 RC5（Codex++ 1.4.0 × CCW 6.1.3）隔离冒烟 9/9；真实账号验收仍 `not_run`。
+- AI 规则初始化见 [task card](260908/1208-ai-rules-init/task-card.md)。
+- Remotes: `origin=CzzRef/codex-chatgpt-web`，`upstream=miuuyy/codex-chatgpt-web`。
 
 ## Active Task Index
 
 | Task | Status | Authoritative Doc | Verification | Notes |
 | --- | --- | --- | --- | --- |
-| AI rules init | `implemented-local / gitfork-local-committed / unpushed` | [task-card](260908/1208-ai-rules-init/task-card.md) | project audit 仅余官方短入口 2 条 inherited | no app code |
+| AI rules init | `implemented-local / gitfork-local-committed` | [task-card](260908/1208-ai-rules-init/task-card.md) | project audit 仅余官方短入口 2 条 inherited | no app code |
+| Unified V0.1 | `merged-local / origin pending` | [control record](../../docs/worktree-control/260908-ccw-unified.md) | RC5 smoke 9/9; focused 81 + launcher 16; account `not_run` | czz-dev 6.1.3; work `5fbc29b` |
 
 ## Verification State
 
-- Last verified: 2026-09-08 (docs/rules)
-- Commands: CodeNote `audit_ai_rules.py --mode project`；authored-file code-link audit
-- Unverified gaps: live launcher, ChatGPT login, MCP, doctor-against-daemon, package install, `bun test`
+- Last verified: 2026-09-29 (RC5 isolated smoke 9/9; focused bun 81 + launcher 16)
+- Commands: CodeNote `audit_ai_rules.py --mode project`；authored-file code-link audit；`bun test` focused
+- Unverified gaps: live launcher activation, ChatGPT login, Full MCP, doctor-against-daemon, package install, Voice
 - Latest Sidecar result: main-thread
 - Latest Prior Task Overlap: reference-only wechat-download-api / GitFork/codex-host adapter shape; decision `new-task`
 - Latest Documentation Impact: `project-current`
